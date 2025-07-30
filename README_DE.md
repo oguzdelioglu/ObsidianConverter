@@ -9,12 +9,12 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README_TR.md">Türkçe</a> |
-  <a href="README_ES.md">Español</a> |
-  <a href="README_DE.md">Deutsch</a> |
-  <a href="README_FR.md">Français</a> |
-  <a href="README_ZH.md">中文</a>
+  <a href="README.md">🇬🇧 English</a> |
+  <a href="README_TR.md">🇹🇷 Türkçe</a> |
+  <a href="README_ES.md">🇪🇸 Español</a> |
+  <a href="README_DE.md">🇩🇪 Deutsch</a> |
+  <a href="README_FR.md">🇫🇷 Français</a> |
+  <a href="README_ZH.md">🇨🇳 中文</a>
 </p>
 
 ## Funktionen
