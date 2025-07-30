@@ -136,8 +136,7 @@ alias: [{title}]
 ---
 
 """
-    
-        def write_note(self, title, content, category=None, tags=None):
+    def write_note(self, title, content, category=None, tags=None):
         """
         Write a note to the Obsidian vault with proper linking
         
@@ -159,16 +158,92 @@ alias: [{title}]
         
         # Make sure we use one of the main categories
         main_categories = ["Technology", "Finance", "Personal", "Projects", "Knowledge", "Reference"]
-        if category not in main_categories:
-            # Try to match to a main category
-            if category and any(c.lower() in category.lower() for c in main_categories):
+        
+        if not category or category not in main_categories:
+            # Try more sophisticated matching
+            if category:
+                # Try exact case insensitive matching first
+                category_lower = category.lower()
+                found_match = False
                 for main_cat in main_categories:
-                    if main_cat.lower() in category.lower():
+                    if main_cat.lower() == category_lower:
                         category = main_cat
+                        found_match = True
                         break
+                        
+                # If no exact match, try partial matching
+                if not found_match:
+                    for main_cat in main_categories:
+                        if main_cat.lower() in category_lower or category_lower in main_cat.lower():
+                            category = main_cat
+                            found_match = True
+                            break
+                    
+                    # If still no match, use semantic mapping
+                    if not found_match:
+                        # Map common categories to main categories
+                        tech_categories = ["web", "programming", "code", "development", "software", "app", "computer", "server", "network", "database", "api", "cyber", "devops", "algorithm", "digital"]
+                        finance_categories = ["money", "financial", "economy", "business", "invest", "crypto", "blockchain", "banking", "budget", "tax", "trading", "accounting", "economic", "market"]
+                        personal_categories = ["health", "life", "diary", "journal", "self", "habit", "routine", "emotion", "feeling", "relationship", "family", "fitness", "wellness", "mental"]
+                        project_categories = ["project", "task", "work", "plan", "management", "team", "milestone", "startup", "product", "implementation", "delivery", "meeting", "workflow", "operation"]
+                        knowledge_categories = ["learn", "study", "concept", "theory", "education", "training", "science", "research", "academic", "topic", "subject", "field", "discipline", "method"]
+                        reference_categories = ["reference", "guide", "manual", "documentation", "instruction", "template", "list", "directory", "collection", "resource", "document", "account", "credential"]
+                        
+                        # Check for keyword matches
+                        for word in re.findall(r'\w+', category_lower):
+                            if word in tech_categories:
+                                category = "Technology"
+                                found_match = True
+                                break
+                            elif word in finance_categories:
+                                category = "Finance"
+                                found_match = True
+                                break
+                            elif word in personal_categories:
+                                category = "Personal"
+                                found_match = True
+                                break
+                            elif word in project_categories:
+                                category = "Projects"
+                                found_match = True
+                                break
+                            elif word in knowledge_categories:
+                                category = "Knowledge"
+                                found_match = True
+                                break
+                            elif word in reference_categories:
+                                category = "Reference"
+                                found_match = True
+                                break
+                                
+                        # If still no match, check for common subcategories
+                        if not found_match:
+                            # Technology subcategories
+                            if any(x in category_lower for x in ["android", "ios", "mobile", "web", "seo", "wordpress", "coding", "program", "dev", "github", "git", "security", "data", "ui", "ux"]):
+                                category = "Technology"
+                            # Finance subcategories
+                            elif any(x in category_lower for x in ["token", "coin", "nft", "defi", "exchange", "wallet", "transaction", "payment", "income", "revenue"]):
+                                category = "Finance"
+                            # Personal subcategories
+                            elif any(x in category_lower for x in ["productivity", "meditation", "mindful", "exercise", "diet", "sleep", "stress", "therapy"]):
+                                category = "Personal"
+                            # Projects subcategories
+                            elif any(x in category_lower for x in ["business", "marketing", "sales", "client", "customer", "growth", "strategy"]):
+                                category = "Projects"
+                            # Knowledge subcategories
+                            elif any(x in category_lower for x in ["tutorial", "guide", "course", "lesson", "definition", "example", "literature", "history"]):
+                                category = "Knowledge"
+                            # Reference subcategories
+                            elif any(x in category_lower for x in ["specification", "standard", "protocol", "formula", "checklist", "password", "contact"]):
+                                category = "Reference"
+                            else:
+                                # Default to Knowledge if no match is found
+                                logger.warning(f"Category '{category}' not in main categories, using 'Knowledge' instead")
+                                category = "Knowledge"
+                        
             else:
-                # Default to Knowledge if no match
-                logger.warning(f"Category '{category}' not in main categories, using 'Knowledge' instead")
+                # If category is None or empty, use Knowledge as default
+                logger.warning(f"No category specified, using 'Knowledge' instead")
                 category = "Knowledge"
         
         # Check if content is long enough to add a table of contents
@@ -552,6 +627,23 @@ Welcome to your knowledge base! This page serves as the central hub to navigate 
         
         return home_path
 
+    def _process_file_worker(self, file_path):
+        """
+        Worker function for parallel processing
+        
+        Args:
+            file_path: Path to the file to process
+            
+        Returns:
+            Tuple of (number of notes created, file path)
+        """
+        try:
+            created = self.process_file(file_path)
+            return len(created), file_path
+        except Exception as e:
+            logger.error(f"Error processing item {file_path}: {e}")
+            return 0, file_path
+            
     def run(self):
         """
         Run the conversion process for all files
@@ -573,18 +665,9 @@ Welcome to your knowledge base! This page serves as the central hub to navigate 
             # Parallel processing
             logger.info(f"Using parallel processing with {self.config.max_workers} workers")
             
-            # Define a worker function that processes a single file
-            def process_file_worker(file_path):
-                try:
-                    created = self.process_file(file_path)
-                    return len(created), file_path
-                except Exception as e:
-                    logger.error(f"Error in worker processing {file_path}: {e}")
-                    return 0, file_path
-            
             # Execute processing in parallel
             results = execute_in_parallel(
-                process_file_worker, 
+                self._process_file_worker, 
                 text_files, 
                 max_workers=self.config.max_workers,
                 desc="Processing files"

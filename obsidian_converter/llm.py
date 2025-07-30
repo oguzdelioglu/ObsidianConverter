@@ -90,7 +90,7 @@ class ContentProcessor:
             except:
                 pass
             
-                        return f"""
+        return f"""
             # Obsidian Note Creation Task
 
             You are an expert knowledge organizer who specializes in creating well-structured Obsidian notes. Your task is to analyze text content and convert it into logically organized Obsidian markdown notes.
@@ -115,16 +115,17 @@ class ContentProcessor:
 
             ### Metadata Generation:
             1. Generate 3-5 relevant tags that describe key concepts (no # prefix in frontmatter)
-            2. Use ONLY these primary categories for folder organization (choose the single most appropriate one):
-               - Technology (tech, software, programming, development, IT)
-               - Finance (money, investing, cryptocurrency, banking)
-               - Personal (life, health, goals, habits)
-               - Projects (work, business, initiatives)
-               - Knowledge (concepts, theories, learning)
-               - Reference (guides, manuals, instructions)
-            3. Use specific, descriptive tags for sub-categorization instead of creating sub-folders
-            4. Always use kebab-case for tags (e.g., "project-management" not "project management")
-            5. Include today's date in YYYY-MM-DD format
+            2. USE EXCLUSIVELY ONE OF THESE PRIMARY CATEGORIES for folder organization (this is critical):
+               - Technology (tech, software, programming, development, IT, coding, web, computer, network, server, database)
+               - Finance (money, investing, cryptocurrency, banking, economy, trading, market, accounting, budget)
+               - Personal (life, health, goals, habits, fitness, wellbeing, relationships, journal, diary)
+               - Projects (work, business, initiatives, planning, tasks, milestones, development, implementation)
+               - Knowledge (concepts, theories, learning, education, research, science, studies, information)
+               - Reference (guides, manuals, instructions, documentation, resources, lists, collections)
+            3. DO NOT CREATE ANY OTHER CATEGORIES - you MUST select from the above list ONLY
+            4. Use specific, descriptive tags for sub-categorization instead of creating sub-folders
+            5. Always use kebab-case for tags (e.g., "project-management" not "project management")
+            6. Include today's date in YYYY-MM-DD format
 
             ### Link Management:
             1. Create EXPLICIT links to other potential notes using [[Topic]] syntax
@@ -142,14 +143,14 @@ class ContentProcessor:
             - Tables: Use markdown tables for structured information
 
             ## Output Format:
-            For each section, create:
+            For each section, STRICTLY follow this exact format:
 
             ```
             ---
             title: "Clear Descriptive Title"
             tags: ["primary-topic", "specific-concept", "technical-area"]
-            date: YYYY-MM-DD
-            category: CategoryName
+            date: 2025-07-30
+            category: Technology|Finance|Personal|Projects|Knowledge|Reference
             alias: ["Alternative Name", "Another Reference"]
             ---
 
@@ -161,6 +162,10 @@ class ContentProcessor:
             - [[Concept-One]] - Brief description of relationship
             - [[Concept-Two]] - Brief description of relationship
             ```
+
+            IMPORTANT: Your output MUST contain the full frontmatter block with YAML format exactly as shown above.
+            The category MUST be one of the six allowed categories.
+            Use real content in place of the placeholders.
 
             ## Content to Analyze:
             {content}
@@ -211,62 +216,162 @@ class ContentProcessor:
             List of tuples (title, body, category, tags)
         """
         sections = []
+        allowed_categories = ["Technology", "Finance", "Personal", "Projects", "Knowledge", "Reference"]
         
         # Use regex to find each markdown section with frontmatter
         pattern = r'---\s*\n(.*?)\n---\s*\n(.*?)(?=\n---|\Z)'
         matches = re.finditer(pattern, llm_output, re.DOTALL)
         
         for match in matches:
-            frontmatter = match.group(1)
-            content = match.group(2).strip()
+            try:
+                frontmatter = match.group(1)
+                content = match.group(2).strip()
+                
+                # Extract metadata from frontmatter
+                title_match = re.search(r'title:\s*"?(.*?)"?$', frontmatter, re.MULTILINE)
+                tags_match = re.search(r'tags:\s*\[(.*?)\]', frontmatter, re.DOTALL)
+                category_match = re.search(r'category:\s*(.*?)$', frontmatter, re.MULTILINE)
+                
+                title = title_match.group(1).strip().strip('"\'') if title_match else "Untitled Note"
+                
+                # Enhanced tag extraction
+                tags = []
+                if tags_match:
+                    # Handle different tag formats: ["tag1", "tag2"] or [tag1, tag2] or ["tag1","tag2"]
+                    raw_tags = tags_match.group(1).strip()
+                    # Remove quotes from tags
+                    tag_pattern = r'"([^"]+)"|\'([^\']+)\'|([^,\s]+)'
+                    tag_matches = re.findall(tag_pattern, raw_tags)
+                    for tag_match in tag_matches:
+                        # Each match is a tuple with the captured groups, only one will have a value
+                        tag = next((t for t in tag_match if t), "").strip()
+                        if tag:
+                            tags.append(tag)
+                
+                # Improved category handling
+                if category_match:
+                    category = category_match.group(1).strip().strip('"\'')
+                    # Validate against allowed categories
+                    if category not in allowed_categories:
+                        # Try case insensitive matching
+                        category_lower = category.lower()
+                        found = False
+                        for allowed in allowed_categories:
+                            if allowed.lower() == category_lower:
+                                category = allowed
+                                found = True
+                                break
+                        
+                        # If still not found, generate from title
+                        if not found:
+                            category = self._generate_category_from_title(title)
+                else:
+                    category = self._generate_category_from_title(title)
+                
+                # Create proper formatted content
+                formatted_content = f"## {title}\n\n{content}"
+                sections.append((title, formatted_content, category, tags))
             
-            # Extract metadata from frontmatter
-            title_match = re.search(r'title:\s*"?(.*?)"?$', frontmatter, re.MULTILINE)
-            tags_match = re.search(r'tags:\s*\[(.*?)\]', frontmatter, re.DOTALL)
-            category_match = re.search(r'category:\s*(.*?)$', frontmatter, re.MULTILINE)
-            
-            title = title_match.group(1).strip().strip('"\'') if title_match else "Untitled Note"
-            
-            # Enhanced tag extraction
-            tags = []
-            if tags_match:
-                # Handle different tag formats: ["tag1", "tag2"] or [tag1, tag2] or ["tag1","tag2"]
-                raw_tags = tags_match.group(1).strip()
-                # Remove quotes from tags
-                tag_pattern = r'"([^"]+)"|\'([^\']+)\'|([^,\s]+)'
-                tag_matches = re.findall(tag_pattern, raw_tags)
-                for tag_match in tag_matches:
-                    # Each match is a tuple with the captured groups, only one will have a value
-                    tag = next((t for t in tag_match if t), "").strip()
-                    if tag:
-                        tags.append(tag)
-            
-            category = category_match.group(1).strip().strip('"\'') if category_match else None
-            
-            sections.append((title, content, category, tags))
+            except Exception as e:
+                logger.warning(f"Error extracting section: {str(e)}")
+                continue
         
-        # Fallback if no sections were extracted
+        # Multiple fallback methods if no sections were extracted
         if not sections:
-            logger.warning(f"Failed to extract sections from {context_path}, using fallback method")
-            # Use simple split by H2 headings as fallback
-            h2_sections = re.split(r'## (.*?)\n', llm_output)
-            if len(h2_sections) > 1:
-                for i in range(1, len(h2_sections), 2):
-                    if i+1 < len(h2_sections):
-                        title = h2_sections[i].strip()
-                        body = h2_sections[i+1].strip()
-                        
-                        # Generate category based on content
-                        category = self._generate_category_from_title(title)
-                        # Generate basic tags
+            logger.warning(f"Failed to extract sections from {context_path}, trying multiple fallback methods")
+            
+            # Attempt 1: Try relaxed frontmatter pattern
+            try:
+                relaxed_pattern = r'---\s*(.*?)---\s*(.*?)(?=---|$)'
+                relaxed_matches = re.finditer(relaxed_pattern, llm_output, re.DOTALL)
+                for match in relaxed_matches:
+                    fm = match.group(1).strip()
+                    body = match.group(2).strip()
+                    
+                    # Try to extract title
+                    title_match = re.search(r'title:[ \t]*["\']?(.*?)["\']?[\n\r]', fm, re.MULTILINE)
+                    title = title_match.group(1).strip() if title_match else "Untitled Note"
+                    
+                    # Try to extract category
+                    category = self._generate_category_from_title(title)
+                    
+                    # Try to extract tags
+                    tags = []
+                    tags_match = re.search(r'tags:[ \t]*\[(.*?)\]', fm, re.DOTALL)
+                    if tags_match:
+                        raw_tags = tags_match.group(1).strip()
+                        tag_matches = re.findall(r'"([^"]+)"|\'([^\']+)\'|([^,\s]+)', raw_tags)
+                        for tag_match in tag_matches:
+                            tag = next((t for t in tag_match if t), "").strip()
+                            if tag:
+                                tags.append(tag)
+                    
+                    if not tags:
                         tags = self._generate_tags_from_content(title, body)
-                        
-                        sections.append((title, f"## {title}\n\n{body}", category, tags))
+                    
+                    formatted_content = f"## {title}\n\n{body}"
+                    sections.append((title, formatted_content, category, tags))
+            except Exception as e:
+                logger.debug(f"Relaxed frontmatter extraction failed: {str(e)}")
+            
+            # Attempt 2: Use heading-based extraction if still empty
+            if not sections:
+                try:
+                    # Use simple split by H2 headings as fallback
+                    h2_sections = re.split(r'## (.*?)\n', llm_output)
+                    if len(h2_sections) > 1:
+                        for i in range(1, len(h2_sections), 2):
+                            if i+1 < len(h2_sections):
+                                title = h2_sections[i].strip()
+                                body = h2_sections[i+1].strip()
+                                
+                                # Generate category and tags
+                                category = self._generate_category_from_title(title)
+                                tags = self._generate_tags_from_content(title, body)
+                                
+                                formatted_content = f"## {title}\n\n{body}"
+                                sections.append((title, formatted_content, category, tags))
+                except Exception as e:
+                    logger.debug(f"Heading-based extraction failed: {str(e)}")
+            
+            # Final attempt: Treat the entire content as a single note
+            if not sections:
+                try:
+                    # Try to find a title or use the first line/sentence
+                    title_match = re.search(r'^#+\s+(.*?)$', llm_output, re.MULTILINE)
+                    if title_match:
+                        title = title_match.group(1).strip()
+                    else:
+                        # Use first non-empty line as title
+                        first_lines = [line.strip() for line in llm_output.split('\n') if line.strip()]
+                        if first_lines:
+                            # Limit title length
+                            title = first_lines[0][:50]
+                            if len(first_lines[0]) > 50:
+                                title += "..."
+                        else:
+                            title = os.path.basename(context_path) if context_path else "Untitled Note"
+                    
+                    # Generate metadata
+                    category = self._generate_category_from_title(title)
+                    tags = self._generate_tags_from_content(title, llm_output)
+                    
+                    formatted_content = f"## {title}\n\n{llm_output}"
+                    sections.append((title, formatted_content, category, tags))
+                except Exception as e:
+                    logger.warning(f"All section extraction methods failed: {str(e)}")
+                    # Create minimal fallback note
+                    title = os.path.basename(context_path) if context_path else "Untitled Note"
+                    category = "Knowledge"
+                    tags = []
+                    formatted_content = f"## {title}\n\n{llm_output}"
+                    sections.append((title, formatted_content, category, tags))
         
-        # Post-process: ensure all sections have a category
+        # Post-process: ensure all sections have a valid category
         for i, (title, content, category, tags) in enumerate(sections):
-            if not category:
-                sections[i] = (title, content, self._generate_category_from_title(title), tags)
+            if not category or category not in allowed_categories:
+                new_category = self._generate_category_from_title(title)
+                sections[i] = (title, content, new_category, tags)
                 
         return sections
     
@@ -286,27 +391,49 @@ class ContentProcessor:
         main_categories = {
             "Technology": ["tech", "software", "programming", "code", "app", "website", "internet", "computer", 
                         "digital", "online", "web", "development", "algorithm", "database", "server", "api", 
-                        "framework", "library", "tool", "script", "system", "network"],
+                        "framework", "library", "tool", "script", "system", "network", "coding", "developer",
+                        "it", "application", "browser", "cybersecurity", "cloud", "mobile", "hardware",
+                        "security", "automation", "data", "interface", "platform", "api", "blockchain",
+                        "devops", "android", "ios", "seo", "wordpress", "domain", "seo", "github", "git"],
                         
-            "Finance": ["money", "financial", "invest", "stock", "market", "crypto", "currency", "bitcoin", 
+            "Finance": ["money", "financial", "invest", "stock", "market", "crypto", "cryptocurrency", "bitcoin", 
                       "ethereum", "banking", "economy", "fund", "income", "expense", "budget", "accounting", 
-                      "transaction", "payment", "wallet", "bank", "trading", "tax"],
+                      "transaction", "payment", "wallet", "bank", "trading", "tax", "finance", "solana",
+                      "binance", "exchange", "token", "coin", "blockchain", "defi", "nft", "mining",
+                      "staking", "investment", "profit", "revenue", "asset", "liability", "capital",
+                      "loan", "interest", "mortgage", "insurance", "wealth", "portfolio"],
                       
             "Personal": ["health", "life", "diary", "journal", "personal", "habit", "routine", "goal", 
                        "achievement", "hobby", "fitness", "meditation", "reflection", "self", "emotion", 
-                       "feeling", "mood", "relationship", "experience", "memory", "dream", "wellness"],
+                       "feeling", "mood", "relationship", "experience", "memory", "dream", "wellness",
+                       "family", "friend", "social", "mental", "physical", "spiritual", "diet", 
+                       "exercise", "mindfulness", "productivity", "sleep", "stress", "therapy", 
+                       "psychology", "motivation", "happiness", "travel", "adventure", "food", "recipe"],
                        
             "Projects": ["project", "business", "work", "task", "initiative", "startup", "venture", 
                        "plan", "idea", "proposal", "collaboration", "team", "schedule", "timeline", 
-                       "milestone", "deliverable", "objective", "goal", "product", "service"],
+                       "milestone", "deliverable", "objective", "goal", "product", "service",
+                       "management", "planning", "roadmap", "strategy", "implementation", "client",
+                       "customer", "marketing", "sales", "brand", "launch", "growth", "metric",
+                       "kpi", "agile", "sprint", "backlog", "requirement", "scope", "budget",
+                       "deadline", "progress", "status", "meeting", "workflow", "operations"],
                        
             "Knowledge": ["learn", "study", "concept", "theory", "principle", "method", "process", "discipline", 
                         "subject", "topic", "field", "course", "education", "training", "skill", "lesson", 
-                        "tutorial", "guide", "manual", "explanation", "definition", "book", "article", "paper"],
+                        "tutorial", "guide", "manual", "explanation", "definition", "book", "article", "paper",
+                        "science", "math", "history", "philosophy", "language", "grammar", "vocabulary",
+                        "literature", "research", "analysis", "methodology", "technique", "framework",
+                        "model", "hypothesis", "experiment", "observation", "discovery", "invention",
+                        "innovation", "insight", "wisdom", "understanding", "information", "fact",
+                        "networking", "protocol", "server", "linux", "command"],
                         
             "Reference": ["reference", "guide", "manual", "documentation", "instruction", "specification", 
                          "standard", "protocol", "formula", "recipe", "template", "checklist", "directory", 
-                         "index", "catalog", "dictionary", "glossary", "cheatsheet", "resource", "link"]
+                         "index", "catalog", "dictionary", "glossary", "cheatsheet", "resource", "link",
+                         "list", "collection", "compilation", "archive", "repository", "database", 
+                         "record", "document", "file", "backup", "code", "credential", "password",
+                         "contact", "address", "phone", "email", "url", "website", "account",
+                         "identifier", "serial", "key", "license", "certificate", "authorization"]
         }
         
         # Search for keywords in title

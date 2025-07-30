@@ -157,7 +157,7 @@ def parse_arguments():
     parser.add_argument("--no-cache", action="store_true", 
                         help="Disable caching of LLM responses")
     
-    parser.add_argument("--interactive", "-i", action="store_true",
+    parser.add_argument("--interactive", "-it", action="store_true",
                         help="Enable interactive review mode")
                         
     parser.add_argument("--editor", 
