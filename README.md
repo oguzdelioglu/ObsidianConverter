@@ -1,6 +1,21 @@
-# ObsidianConverter
+<p align="center">
+  <img src="logo.png" alt="ObsidianConverter Logo" width="200"/>
+</p>
 
-A powerful utility for converting plain text files into well-structured Obsidian notes with smart linking, tagging, and organization.
+<h1 align="center">ObsidianConverter</h1>
+
+<p align="center">
+  A powerful utility for converting plain text files into well-structured Obsidian notes with smart linking, tagging, and organization.
+</p>
+
+<p align="center">
+  <a href="README.md">English</a> |
+  <a href="README_TR.md">Türkçe</a> |
+  <a href="README_ES.md">Español</a> |
+  <a href="README_DE.md">Deutsch</a> |
+  <a href="README_FR.md">Français</a> |
+  <a href="README_ZH.md">中文</a>
+</p>
 
 ## Features
 
