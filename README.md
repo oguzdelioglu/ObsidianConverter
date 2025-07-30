@@ -10,12 +10,23 @@ A powerful utility for converting plain text files into well-structured Obsidian
 - **Obsidian-Optimized Output**: Creates files with proper frontmatter and formatting for Obsidian
 - **Smart Tag Generation**: Suggests relevant tags based on note content
 - **Content Categorization**: Organizes notes into logical folders based on content themes
+- **Enhanced Obsidian Integration**: Support for callouts, dataview queries, and table of contents
+- **Parallel Processing**: Process multiple files simultaneously for faster conversion
+- **Configuration System**: Customize behavior through YAML configuration files
+- **Statistics Tracking**: Detailed statistics on conversion process and note creation
+- **Multiple LLM Support**: Works with Ollama, OpenAI, or Anthropic models
+- **Interactive Mode**: Review, edit, and refine notes before saving
+- **Docker Support**: Run with Docker and Docker Compose for easy setup
 
 ## Requirements
 
 - Python 3.8+
-- Ollama (local LLM service)
+- One of the following LLM providers:
+  - [Ollama](https://ollama.ai/) (default, local LLM service)
+  - OpenAI API key (for GPT models)
+  - Anthropic API key (for Claude models)
 - Required Python packages (see `requirements.txt`)
+- Docker (optional, for containerized usage)
 
 ## Installation
 
@@ -31,9 +42,18 @@ A powerful utility for converting plain text files into well-structured Obsidian
 1. Clone this repository
 2. Run: `pip install .`
 
+### Method 3: Docker Installation
+1. Build the Docker image: `docker build -t obsidian-converter .`
+2. Run with Docker: `docker run -v $(pwd)/txt:/data/input -v $(pwd)/vault:/data/output obsidian-converter`
+3. Or use Docker Compose: `docker-compose up`
+
+See [README_DOCKER.md](README_DOCKER.md) for detailed Docker instructions.
+
 ### Prerequisites
-- Ensure [Ollama](https://ollama.ai/) is installed and running with the required model (default: "mistral")
-- If needed, install the model with: `ollama pull mistral`
+- For Ollama: Ensure it's installed and running with the required model (default: "mistral")
+  - Install the model with: `ollama pull mistral`
+- For OpenAI: Set your API key via `--openai-key` argument or `OPENAI_API_KEY` environment variable
+- For Anthropic: Set your API key via `--anthropic-key` argument or `ANTHROPIC_API_KEY` environment variable
 
 ## Usage
 
@@ -56,8 +76,20 @@ obsidian-converter list
 # List notes from a specific category
 obsidian-converter list --category technical
 
+# Create a configuration file
+obsidian-converter config --create --file my_config.yaml
+
+# View current configuration
+obsidian-converter config --file my_config.yaml
+
+# Use a configuration file
+obsidian-converter --config my_config.yaml
+
 # Custom directories
 obsidian-converter --input /path/to/input --output /path/to/output
+
+# Enable parallel processing
+obsidian-converter --parallel --workers 4
 
 # Clean output directory before conversion
 obsidian-converter --clean
@@ -68,17 +100,135 @@ obsidian-converter --model llama2
 # Verbose logging
 obsidian-converter --verbose
 
-# All options
-obsidian-converter --input /path/to/input --output /path/to/output --model llama2 --similarity 0.4 --max-links 10 --clean --verbose
+# Interactive review mode
+obsidian-converter --interactive
+
+# Specify editor for interactive mode
+obsidian-converter --interactive --editor vim
+
+# Use different LLM providers
+obsidian-converter --provider ollama --model llama2
+obsidian-converter --provider openai --model gpt-3.5-turbo --openai-key YOUR_API_KEY
+obsidian-converter --provider anthropic --model claude-3-sonnet-20240229 --anthropic-key YOUR_API_KEY
+
+# All options combined
+obsidian-converter --input /path/to/input --output /path/to/output --model llama2 \
+  --similarity 0.4 --max-links 10 --clean --verbose --parallel --workers 8 --interactive
 ```
 
 ## Configuration
 
-The tool can be configured through command-line arguments or by editing the constants at the top of the script:
+The tool can be configured through command-line arguments or with a YAML configuration file:
 
-- `INPUT_DIR`: Directory containing text files to process
-- `OUTPUT_DIR`: Directory where Obsidian vault will be created
-- `MODEL`: The Ollama model to use for content processing
+```bash
+# Create a default configuration file
+obsidian-converter config --create --file my_config.yaml
+```
+
+Example configuration file:
+
+```yaml
+# Core settings
+input_dir: txt
+output_dir: vault
+model: mistral
+
+# LLM provider settings
+provider: ollama      # ollama, openai, or anthropic
+openai_api_key: null  # Your OpenAI API key (or use env variable)
+anthropic_api_key: null  # Your Anthropic API key (or use env variable)
+llm_temperature: 0.7  # Temperature for LLM responses
+
+# Processing settings
+similarity_threshold: 0.3
+max_links: 5
+use_cache: true
+cache_file: .llm_cache.json
+
+# Performance settings
+parallel_processing: true
+max_workers: 4
+chunk_size: 1000000  # 1MB chunks for large files
+
+# Obsidian specific settings
+obsidian_features:
+  callouts: true
+  dataview: true
+  toc: true
+  graph_metadata: true
+
+# File patterns to include/exclude
+include_patterns:
+  - '*.txt'
+  - '*.md'
+exclude_patterns:
+  - '*.tmp'
+  - '~*'
+```
+
+You can use this configuration file with:
+
+```bash
+obsidian-converter --config my_config.yaml
+```
+
+## Advanced Features
+
+### Statistics and Reporting
+
+The tool generates statistics about the conversion process, including:
+
+- Number of processed files and created notes
+- Categories and tags distribution
+- Word and character counts
+- LLM performance metrics
+- Processing time
+
+A JSON report is automatically saved in the `.stats` directory within your output folder.
+
+### Parallel Processing
+
+For large document sets, enable parallel processing to speed up conversion:
+
+```bash
+obsidian-converter --parallel --workers 4
+```
+
+### Memory Optimization
+
+Large files are automatically processed in chunks to reduce memory usage. You can customize the chunk size in the configuration file.
+
+### Custom File Patterns
+
+By default, the tool processes `.txt` files, but you can customize the patterns in the configuration file:
+
+```yaml
+include_patterns:
+  - '*.txt'  # Text files
+  - '*.md'   # Markdown files
+  - 'notes_*.log'  # Log files with specific naming
+```
+
+### Interactive Mode
+
+Review and edit each note before saving with interactive mode:
+
+```bash
+obsidian-converter --interactive
+```
+
+In interactive mode, you can:
+- Edit notes in your preferred text editor
+- Discard notes you don't want to keep
+- Change note categories
+- View full content before deciding
+- Review metadata and suggested links
+
+To specify a custom editor (instead of using your system's default):
+
+```bash
+obsidian-converter --interactive --editor vim
+```
 
 ## Example Output
 

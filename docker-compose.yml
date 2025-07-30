@@ -1,0 +1,32 @@
+version: '3'
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  converter:
+    build: .
+    volumes:
+      - ./txt:/data/input
+      - ./vault:/data/output
+      - ./.llm_cache.json:/app/.llm_cache.json
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    command: --verbose
+
+volumes:
+  ollama_data:

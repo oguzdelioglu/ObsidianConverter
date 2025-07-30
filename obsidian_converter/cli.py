@@ -11,6 +11,7 @@ from pathlib import Path
 
 from obsidian_converter import __version__
 from obsidian_converter.converter import ObsidianConverter
+from obsidian_converter.config import ObsidianConverterConfig
 
 
 # Default settings
@@ -117,9 +118,29 @@ def parse_arguments():
     list_parser = subparsers.add_parser("list", help="List generated notes")
     list_parser.add_argument("--category", help="Filter by category")
     
+    # Config command
+    config_parser = subparsers.add_parser("config", help="Create or view configuration")
+    config_parser.add_argument("--create", action="store_true", 
+                              help="Create a default configuration file")
+    config_parser.add_argument("--file", default="config.yaml", 
+                              help="Path to config file (default: config.yaml)")
+    
     # Advanced options
+    parser.add_argument("--config", "-c", 
+                       help="Path to configuration file")
+    
+    parser.add_argument("--provider", "-p", default="ollama",
+                        choices=["ollama", "openai", "anthropic"],
+                        help="LLM provider to use (default: ollama)")
+                        
     parser.add_argument("--model", "-m", default=DEFAULT_MODEL,
-                        help=f"Ollama model to use (default: {DEFAULT_MODEL})")
+                        help=f"LLM model to use (default: {DEFAULT_MODEL})")
+                        
+    parser.add_argument("--openai-key",
+                        help="OpenAI API key (can also use OPENAI_API_KEY env variable)")
+                        
+    parser.add_argument("--anthropic-key",
+                        help="Anthropic API key (can also use ANTHROPIC_API_KEY env variable)")
     
     parser.add_argument("--similarity", "-s", type=float, default=DEFAULT_SIMILARITY_THRESHOLD,
                         help=f"Similarity threshold for linking notes (default: {DEFAULT_SIMILARITY_THRESHOLD})")
@@ -127,8 +148,20 @@ def parse_arguments():
     parser.add_argument("--max-links", type=int, default=DEFAULT_MAX_LINKS,
                         help=f"Maximum number of links between notes (default: {DEFAULT_MAX_LINKS})")
     
+    parser.add_argument("--parallel", action="store_true", 
+                        help="Enable parallel processing")
+                        
+    parser.add_argument("--workers", type=int,
+                        help="Number of parallel workers (defaults to CPU count)")
+    
     parser.add_argument("--no-cache", action="store_true", 
                         help="Disable caching of LLM responses")
+    
+    parser.add_argument("--interactive", "-i", action="store_true",
+                        help="Enable interactive review mode")
+                        
+    parser.add_argument("--editor", 
+                        help="Specify text editor for interactive mode (default: system EDITOR)")
     
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Enable verbose logging")
@@ -202,6 +235,34 @@ def main():
         print(f"Output directory cleaned: {args.output}")
         return 0
     
+    # Config command handling
+    if args.command == "config":
+        if args.create:
+            config_path = args.file
+            if ObsidianConverterConfig.create_default_config(config_path):
+                print(f"Created default configuration file: {config_path}")
+                print("Edit this file to customize your conversion settings.")
+                return 0
+            else:
+                logger.error(f"Failed to create configuration file: {config_path}")
+                return 1
+        else:
+            # View or validate config
+            config_path = args.file
+            if os.path.exists(config_path):
+                config = ObsidianConverterConfig.from_file(config_path)
+                print("\nCurrent Configuration:")
+                print("-" * 30)
+                for key, value in config.__dict__.items():
+                    if key.startswith('_'):
+                        continue
+                    print(f"{key}: {value}")
+                return 0
+            else:
+                print(f"Configuration file not found: {config_path}")
+                print("Use --create to create a default configuration file")
+                return 1
+    
     # List command handling
     if args.command == "list":
         output_dir = Path(args.output)
@@ -266,15 +327,56 @@ def main():
     if args.clean:
         clean_output_directory(args.output)
     
-    # Create converter
+    # Load config if specified
+    config = None
+    if args.config:
+        if not os.path.exists(args.config):
+            logger.error(f"Configuration file not found: {args.config}")
+            return 1
+        logger.info(f"Loading configuration from: {args.config}")
+        config = ObsidianConverterConfig.from_file(args.config)
+    
+    # If config is loaded, override with command line arguments
+    if config is not None:
+        if args.provider:
+            config.provider = args.provider
+        if args.model:
+            config.model = args.model
+        if args.openai_key:
+            config.openai_api_key = args.openai_key
+        if args.anthropic_key:
+            config.anthropic_api_key = args.anthropic_key
+    
+    # Create converter with config
     converter = ObsidianConverter(
         input_dir=args.input,
         output_dir=args.output,
         model=args.model,
         similarity_threshold=args.similarity,
         max_links=args.max_links,
-        use_cache=not args.no_cache
+        use_cache=not args.no_cache,
+        interactive=args.interactive,
+        config=config
     )
+    
+    # If no config loaded, set provider options directly
+    if config is None and args.provider:
+        converter.config.provider = args.provider
+        if args.openai_key:
+            converter.config.openai_api_key = args.openai_key
+        if args.anthropic_key:
+            converter.config.anthropic_api_key = args.anthropic_key
+    
+    # Set editor for interactive mode if specified
+    if args.interactive and args.editor:
+        if hasattr(converter, 'reviewer'):
+            converter.reviewer.editor = args.editor
+    
+    # Apply additional arguments
+    if args.parallel:
+        converter.config.parallel_processing = True
+    if args.workers:
+        converter.config.max_workers = args.workers
     
     # Process specific files
     if args.command == "files":

@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+.github
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Cache files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.lock
+
+# Data files to exclude
+vault/
+.llm_cache.json
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker related
+.dockerignore
+Dockerfile
+docker-compose.yml

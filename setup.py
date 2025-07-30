@@ -12,13 +12,18 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     install_requires=[
-        "langchain",
-        "langchain-community",
-        "langchain-ollama",
-        "scikit-learn",
-        "tqdm",
-        "python-dotenv"
+        "pyyaml>=6.0",
+        "tqdm>=4.64.0",
+        "scikit-learn>=1.2.0", 
+        "python-dotenv>=1.0.0",
+        "requests>=2.28.0",
+        "langchain-ollama>=0.3.0",
     ],
+    extras_require={
+        "openai": ["openai>=1.0.0"],
+        "anthropic": ["anthropic>=0.8.1"],
+        "all": ["openai>=1.0.0", "anthropic>=0.8.1"],
+    },
     scripts=["bin/obsidian-converter"],
     classifiers=[
         "Development Status :: 4 - Beta",
