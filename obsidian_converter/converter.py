@@ -137,7 +137,7 @@ alias: [{title}]
 
 """
     
-    def write_note(self, title, content, category=None, tags=None):
+        def write_note(self, title, content, category=None, tags=None):
         """
         Write a note to the Obsidian vault with proper linking
         
@@ -157,44 +157,80 @@ alias: [{title}]
             if len(parts) >= 3:
                 content_without_frontmatter = parts[2].strip()
         
+        # Make sure we use one of the main categories
+        main_categories = ["Technology", "Finance", "Personal", "Projects", "Knowledge", "Reference"]
+        if category not in main_categories:
+            # Try to match to a main category
+            if category and any(c.lower() in category.lower() for c in main_categories):
+                for main_cat in main_categories:
+                    if main_cat.lower() in category.lower():
+                        category = main_cat
+                        break
+            else:
+                # Default to Knowledge if no match
+                logger.warning(f"Category '{category}' not in main categories, using 'Knowledge' instead")
+                category = "Knowledge"
+        
         # Check if content is long enough to add a table of contents
         # Add TOC if there are multiple headers in the content
-        if len(content_without_frontmatter.split()) > 200:
+        if len(content_without_frontmatter.split()) > 150:  # Lower threshold to include more TOCs
             # Count headers in content
             header_matches = re.findall(r'^#+\s+.+$', content_without_frontmatter, re.MULTILINE)
-            if len(header_matches) > 2:
+            if len(header_matches) > 1:  # Lower threshold to include more TOCs
                 # Split the content at the first occurrence of ##
                 parts = re.split(r'(^##\s+.*$)', content_without_frontmatter, 1, re.MULTILINE)
                 if len(parts) >= 3:
                     # Add TOC between frontmatter and first heading
                     toc = "\n## Table of Contents\n\n"
-                    toc += "```toc\nstyle: bullet | number | inline (default: bullet)\nmin_depth: 1\nmax_depth: 3\ntitle: In This Note\nallow_inconsistent_headings: false\n```\n\n"
+                    toc += "```toc\nstyle: bullet\nmin_depth: 2\nmax_depth: 3\ntitle: In This Note\n```\n\n"
                     content = content.replace(content_without_frontmatter, parts[0] + toc + parts[1] + parts[2])
-        
+                    
         # Find similar notes
         suggestions = self.suggest_links(content_without_frontmatter)
         
-        # Add related notes section if there are suggestions
-        if suggestions:
-            content += "\n\n## Related Notes\n"
-            # Use a callout block for related notes
-            content += "> [!info] Related content you may find interesting\n>\n"
-            for sug_title, sug_filename in suggestions:
-                # Get the basename without extension for the link display
-                link_name = Path(sug_filename).stem
-                content += f"> - [[{sug_title}|{link_name}]]\n"
+        # Enhanced related notes section
+        if len(suggestions) > 0 or (tags and len(tags) > 0):
+            content += "\n\n## Connections\n"
             
-            # Add dataview query for finding similar notes by tags
+            # Add backlinks section
+            content += "\n### Related Notes\n"
+            
+            if suggestions:
+                # Use a callout block for related notes
+                content += "> [!info] Related content\n>\n"
+                for sug_title, sug_filename in suggestions[:8]:  # Limit to top 8 suggestions
+                    # Get the basename without extension for the link display
+                    link_name = Path(sug_filename).stem
+                    content += f"> - [[{link_name}]] - {sug_title}\n"
+            else:
+                content += "_No related notes found yet._\n"
+                
+            # Add tags section with dataview
+            content += "\n### Notes with Similar Tags\n"
+            
             if tags and isinstance(tags, list) and len(tags) > 0:
-                content += "\n\n## Other Notes with Similar Tags\n"
+                # Properly format tags for dataview query
+                formatted_tags = ' OR '.join([f'"{tag}"' for tag in tags[:3]])
                 content += "```dataview\n"
                 content += "LIST\n"
-                content += f"FROM #{' OR #'.join(tags[:3])}\n"
+                content += f"FROM #({formatted_tags})\n"
                 content += f"WHERE file.name != this.file.name\n"
                 content += "SORT file.mtime DESC\n"
-                content += "LIMIT 5\n"
+                content += "LIMIT 7\n"
                 content += "```\n"
-        
+            else:
+                content += "_Add tags to see related notes here._\n"
+                
+            # Add category browser
+            content += f"\n### More in {category}\n"
+            content += "```dataview\n"
+            content += "LIST\n"
+            content += f"FROM \"{category}\"\n"
+            content += f"WHERE file.name != this.file.name\n"
+            content += "SORT file.name ASC\n"
+            content += "LIMIT 10\n"
+            content += "```\n"
+            
         # Interactive review if enabled
         save_note = True
         if self.interactive:
@@ -203,13 +239,13 @@ alias: [{title}]
                 if not save_note:
                     logger.info(f"Note '{title}' discarded by user")
                     return None
-                
+                    
                 # Re-extract content without frontmatter after possible edits
                 if "---" in content:
                     parts = content.split("---", 2)
                     if len(parts) >= 3:
                         content_without_frontmatter = parts[2].strip()
-                
+                        
                 # Category may have changed during review
                 if category is None:
                     md_filename = create_md_filename(title)
@@ -224,7 +260,7 @@ alias: [{title}]
         else:
             # Normal mode, no interaction
             md_filename = create_md_filename(title, category)
-        
+            
         filepath = os.path.join(self.output_dir, md_filename)
         
         # Create directory if it doesn't exist
@@ -233,7 +269,7 @@ alias: [{title}]
         # Write the note
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
-        
+            
         # Add to existing notes for future linking
         self.existing_notes[md_filename] = (title, content_without_frontmatter)
         
@@ -266,17 +302,70 @@ alias: [{title}]
         if not existing_contents:
             return []
         
-        # Calculate similarity
-        all_texts = existing_contents + [content]
-        vectorizer = TfidfVectorizer().fit_transform(all_texts)
-        
-        similarity = cosine_similarity(vectorizer[-1], vectorizer[:-1])
-        similar_indices = similarity.argsort()[0][-self.max_links:][::-1]
-        
-        # Return list of (title, filename) tuples for similar notes
-        return [(existing_titles[i], existing_filenames[i]) 
-                for i in similar_indices 
-                if similarity[0][i] > self.similarity_threshold]
+        try:
+            # Extract key phrases from content for enhanced matching
+            content_lower = content.lower()
+            key_phrases = set()
+            
+            # Look for common patterns that might indicate key phrases
+            # Extract phrases in quotes
+            quote_phrases = re.findall(r'["\'](.*?)["\']', content)
+            key_phrases.update(quote_phrases)
+            
+            # Extract phrases in brackets/parentheses
+            bracket_phrases = re.findall(r'\[(.*?)\]|\((.*?)\)', content)
+            for phrase_tuple in bracket_phrases:
+                for phrase in phrase_tuple:
+                    if phrase and len(phrase) > 3:
+                        key_phrases.add(phrase)
+            
+            # Extract bolded or italicized text
+            emphasis_phrases = re.findall(r'\*\*(.*?)\*\*|\*(.*?)\*', content)
+            for phrase_tuple in emphasis_phrases:
+                for phrase in phrase_tuple:
+                    if phrase and len(phrase) > 3:
+                        key_phrases.add(phrase)
+            
+            # Extract header text (very important for similarity)
+            headers = re.findall(r'^#+\s+(.*?)$', content, re.MULTILINE)
+            key_phrases.update(headers)
+            
+            # Add content with extra weight for key phrases
+            weighted_content = content
+            for phrase in key_phrases:
+                if len(phrase) > 3:  # Only use meaningful phrases
+                    weighted_content += f" {phrase} {phrase}"  # Repeat for extra weight
+            
+            # Use enhanced vectorizer for better results
+            vectorizer = TfidfVectorizer(
+                stop_words='english',
+                max_features=10000,  # Allow more features
+                ngram_range=(1, 2),  # Include bigrams for better context
+                min_df=1,
+                max_df=0.95
+            )
+            
+            # Calculate similarity with weighted content
+            all_texts = existing_contents + [weighted_content]
+            vectors = vectorizer.fit_transform(all_texts)
+            
+            similarity = cosine_similarity(vectors[-1], vectors[:-1])
+            
+            # Use dynamic similarity threshold - minimum of configured threshold or 0.2
+            effective_threshold = max(self.similarity_threshold, 0.2)
+            
+            # Get top matches plus all that are above threshold
+            max_suggestions = min(12, max(5, self.max_links))  # At least 5, at most 12
+            similar_indices = similarity.argsort()[0][-max_suggestions:][::-1]
+            
+            # Return list of (title, filename) tuples for similar notes
+            return [(existing_titles[i], existing_filenames[i]) 
+                    for i in similar_indices 
+                    if similarity[0][i] > effective_threshold]
+                    
+        except Exception as e:
+            logger.warning(f"Error computing note similarities: {e}")
+            return []
     
     def process_file(self, file_path):
         """
@@ -407,6 +496,62 @@ alias: [{title}]
         
         return text_files
     
+    def create_home_page(self):
+        """
+        Creates a Home.md page as an index for the Obsidian vault
+        
+        Returns:
+            The path to the created home page file
+        """
+        logger.info("Creating Home.md index page for Obsidian vault")
+        
+        # Get all categories in use
+        categories = set()
+        for filename, (title, _) in self.existing_notes.items():
+            category = os.path.dirname(filename)
+            if category:
+                categories.add(category)
+        
+        # Create content
+        content = """---
+title: "Obsidian Vault Home"
+tags: ["index", "dashboard", "home-page"]
+date: """ + datetime.now().strftime("%Y-%m-%d") + """
+alias: ["Home", "Index", "Dashboard"]
+---
+
+# Obsidian Vault Home
+
+Welcome to your knowledge base! This page serves as the central hub to navigate your notes.
+
+## Main Categories
+"""
+        
+        # Add links to main categories
+        main_categories = ["Technology", "Finance", "Personal", "Projects", "Knowledge", "Reference"]
+        for category in main_categories:
+            if category.lower() in [cat.lower() for cat in categories]:
+                content += f"- [[{category}/{category}|{category} Notes]]\n"
+            else:
+                # Include as a potential category even if no notes exist yet
+                content += f"- {category}\n"
+        
+        content += "\n## Recent Notes\n"
+        content += "```dataview\nLIST FROM \"\" \nSORT file.mtime DESC\nWHERE file.name != \"Home\"\nLIMIT 10\n```\n\n"
+        
+        content += "## Most Linked Notes\n"
+        content += "```dataview\nTABLE length(file.inlinks) as \"Incoming Links\" \nSORT length(file.inlinks) DESC\nWHERE file.name != \"Home\"\nLIMIT 5\n```\n\n"
+        
+        content += "## Tags Overview\n"
+        content += "```dataview\nLIST\nGROUP BY tags\nLIMIT 20\n```\n\n"
+        
+        # Save the home page
+        home_path = os.path.join(self.output_dir, "Home.md")
+        with open(home_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        
+        return home_path
+
     def run(self):
         """
         Run the conversion process for all files
@@ -453,6 +598,12 @@ alias: [{title}]
             for file_path in tqdm(text_files, desc="Processing files"):
                 created_files = self.process_file(file_path)
                 total_notes += len(created_files)
+        
+        # Create Home.md index page if notes were generated
+        if total_notes > 0:
+            logger.info("Creating Home.md index page")
+            self.create_home_page()
+            total_notes += 1  # Count Home.md as an additional note
         
         # Save cache when done
         self.processor._save_cache()

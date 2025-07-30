@@ -90,63 +90,81 @@ class ContentProcessor:
             except:
                 pass
             
-        return f"""
-# Obsidian Note Creation Task
+                        return f"""
+            # Obsidian Note Creation Task
 
-You are an expert knowledge organizer who specializes in creating well-structured Obsidian notes. Your task is to analyze text content and convert it into logically organized Obsidian markdown notes.
+            You are an expert knowledge organizer who specializes in creating well-structured Obsidian notes. Your task is to analyze text content and convert it into logically organized Obsidian markdown notes.
 
-## Context{file_context}
+            ## Context{file_context}
 
-## Instructions
+            ## Instructions
 
-### Content Analysis:
-1. Carefully analyze the content to identify distinct topics or sections
-2. Each logical topic should become a separate note with its own frontmatter
-3. Identify natural boundaries between concepts or subjects
-4. Preserve all important information from the original content
-5. Maintain code blocks, lists, and other formatting
+            ### Content Analysis:
+            1. Carefully analyze the content to identify distinct topics or sections
+            2. Each logical topic should become a separate note with its own frontmatter
+            3. Identify natural boundaries between concepts or subjects
+            4. Preserve all important information from the original content
+            5. Maintain code blocks, lists, and other formatting
 
-### Note Structure:
-1. Create meaningful titles that accurately reflect the content
-2. Organize content with appropriate heading levels (H2, H3, etc.)
-3. Use bullet points or numbered lists for series of related items
-4. Preserve code blocks with correct language identifiers
-5. Split very long notes into multiple related notes if appropriate
+            ### Note Structure:
+            1. Create meaningful titles that accurately reflect the content - without timestamps or date prefixes
+            2. Organize content with appropriate heading levels (H2, H3, etc.)
+            3. Use bullet points or numbered lists for series of related items
+            4. Preserve code blocks with correct language identifiers
+            5. Split very long notes into multiple related notes if appropriate
 
-### Metadata Generation:
-1. Generate 3-7 relevant tags that describe key concepts (no # prefix in frontmatter)
-2. Assign each note to a logical category folder
-3. Choose specific, descriptive tags (avoid overly generic tags)
-4. Use multi-word tags for complex concepts (e.g., "project-management" not "project")
-5. Include today's date in YYYY-MM-DD format
+            ### Metadata Generation:
+            1. Generate 3-5 relevant tags that describe key concepts (no # prefix in frontmatter)
+            2. Use ONLY these primary categories for folder organization (choose the single most appropriate one):
+               - Technology (tech, software, programming, development, IT)
+               - Finance (money, investing, cryptocurrency, banking)
+               - Personal (life, health, goals, habits)
+               - Projects (work, business, initiatives)
+               - Knowledge (concepts, theories, learning)
+               - Reference (guides, manuals, instructions)
+            3. Use specific, descriptive tags for sub-categorization instead of creating sub-folders
+            4. Always use kebab-case for tags (e.g., "project-management" not "project management")
+            5. Include today's date in YYYY-MM-DD format
 
-## Obsidian Formatting Features to Use:
-- Internal links: [[note-name]] to reference related concepts
-- Bold: **text** for emphasis of important points
-- Italics: *text* for definitions or specialized terms
-- Callouts: > [!note] for important information
-- Code blocks: ```language\\ncode\\n``` for any code or commands
-- Tables: Use markdown tables for structured information
+            ### Link Management:
+            1. Create EXPLICIT links to other potential notes using [[Topic]] syntax
+            2. For each main concept mentioned, create a link to that concept the FIRST time it appears
+            3. Avoid overlinking - only link important concepts, not every term
+            4. Use descriptive link text with pipe syntax when helpful: [[actual-note-title|Descriptive Link Text]]
+            5. Consider creating bidirectional links between closely related concepts
 
-## Output Format:
-For each section, create:
+            ## Obsidian Formatting Features to Use:
+            - Internal links: [[note-name]] to reference related concepts
+            - Bold: **text** for emphasis of important points
+            - Italics: *text* for definitions or specialized terms
+            - Callouts: > [!note] for important information
+            - Code blocks: ```language\\ncode\\n``` for any code or commands
+            - Tables: Use markdown tables for structured information
 
-```
----
-title: "Clear Descriptive Title"
-tags: ["primary-topic", "specific-concept", "technical-area"]
-date: YYYY-MM-DD
-category: CategoryName
----
+            ## Output Format:
+            For each section, create:
 
-## Clear Descriptive Title
+            ```
+            ---
+            title: "Clear Descriptive Title"
+            tags: ["primary-topic", "specific-concept", "technical-area"]
+            date: YYYY-MM-DD
+            category: CategoryName
+            alias: ["Alternative Name", "Another Reference"]
+            ---
 
-[Well-formatted content with appropriate markdown structure]
-```
+            ## Clear Descriptive Title
 
-## Content to Analyze:
-{content}
-"""
+            [Well-formatted content with appropriate markdown structure and explicit links to related concepts]
+
+            ## Related Concepts
+            - [[Concept-One]] - Brief description of relationship
+            - [[Concept-Two]] - Brief description of relationship
+            ```
+
+            ## Content to Analyze:
+            {content}
+            """
     
     def process_content(self, content, context_path=""):
         """
@@ -255,59 +273,50 @@ category: CategoryName
     def _generate_category_from_title(self, title):
         """
         Generate a category based on the title
-        
+
         Args:
             title: The note title
-            
+
         Returns:
-            A suggested category name
+            A suggested category name from the restricted set of main categories
         """
         title_lower = title.lower()
         
-        # Common categories based on keywords
-        category_mapping = {
-            'project': 'Projects',
-            'task': 'Tasks',
-            'meeting': 'Meetings',
-            'note': 'Notes',
-            'idea': 'Ideas',
-            'research': 'Research',
-            'code': 'CodeSnippets',
-            'snippet': 'CodeSnippets',
-            'document': 'Documentation',
-            'guide': 'Guides',
-            'tutorial': 'Tutorials',
-            'reference': 'References',
-            'book': 'Books',
-            'article': 'Articles',
-            'paper': 'Papers',
-            'study': 'Studies',
-            'concept': 'Concepts',
-            'theory': 'Theories',
-            'finance': 'Finance',
-            'personal': 'Personal',
-            'work': 'Work',
-            'journal': 'Journal',
-            'review': 'Reviews',
-            'technical': 'Technical',
-            'design': 'Design'
+        # ONLY use these main categories for organization
+        main_categories = {
+            "Technology": ["tech", "software", "programming", "code", "app", "website", "internet", "computer", 
+                        "digital", "online", "web", "development", "algorithm", "database", "server", "api", 
+                        "framework", "library", "tool", "script", "system", "network"],
+                        
+            "Finance": ["money", "financial", "invest", "stock", "market", "crypto", "currency", "bitcoin", 
+                      "ethereum", "banking", "economy", "fund", "income", "expense", "budget", "accounting", 
+                      "transaction", "payment", "wallet", "bank", "trading", "tax"],
+                      
+            "Personal": ["health", "life", "diary", "journal", "personal", "habit", "routine", "goal", 
+                       "achievement", "hobby", "fitness", "meditation", "reflection", "self", "emotion", 
+                       "feeling", "mood", "relationship", "experience", "memory", "dream", "wellness"],
+                       
+            "Projects": ["project", "business", "work", "task", "initiative", "startup", "venture", 
+                       "plan", "idea", "proposal", "collaboration", "team", "schedule", "timeline", 
+                       "milestone", "deliverable", "objective", "goal", "product", "service"],
+                       
+            "Knowledge": ["learn", "study", "concept", "theory", "principle", "method", "process", "discipline", 
+                        "subject", "topic", "field", "course", "education", "training", "skill", "lesson", 
+                        "tutorial", "guide", "manual", "explanation", "definition", "book", "article", "paper"],
+                        
+            "Reference": ["reference", "guide", "manual", "documentation", "instruction", "specification", 
+                         "standard", "protocol", "formula", "recipe", "template", "checklist", "directory", 
+                         "index", "catalog", "dictionary", "glossary", "cheatsheet", "resource", "link"]
         }
         
-        # Check if title contains any key terms
-        for keyword, category in category_mapping.items():
-            if keyword in title_lower:
-                return category
-                
-        # Default categories based on first word or general content
-        if title_lower.startswith('how to'):
-            return 'Guides'
-        elif title_lower.startswith('why'):
-            return 'Explanations'
-        elif title_lower.startswith('what is'):
-            return 'Definitions'
+        # Search for keywords in title
+        for category, keywords in main_categories.items():
+            for keyword in keywords:
+                if keyword in title_lower:
+                    return category
         
-        # Default category
-        return 'General'
+        # If no keywords match, assign to Knowledge by default
+        return "Knowledge"
     
     def _generate_tags_from_content(self, title, content):
         """
