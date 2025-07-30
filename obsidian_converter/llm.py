@@ -5,6 +5,8 @@ import os
 import re
 import json
 import logging
+import traceback
+from datetime import datetime
 
 from obsidian_converter.llm_providers.provider_factory import LLMProviderFactory
 from obsidian_converter.llm_providers.base import BaseLLMProvider
@@ -36,6 +38,10 @@ class ContentProcessor:
         self.cache = {}
         
         # Initialize the LLM provider
+        # Set default timeout if not provided
+        if 'timeout' not in kwargs and provider == 'ollama':
+            kwargs['timeout'] = 300  # 5 minutes default timeout for Ollama
+            
         try:
             self.llm = LLMProviderFactory.create_provider(provider, model, **kwargs)
             logger.info(f"Initialized {provider} LLM provider with model {model}")
@@ -44,7 +50,10 @@ class ContentProcessor:
             logger.warning(f"Falling back to Ollama provider with model mistral")
             self.provider_name = "ollama"
             self.model = "mistral"
-            self.llm = LLMProviderFactory.create_provider("ollama", "mistral")
+            # Ensure timeout is set for fallback provider
+            if 'timeout' not in kwargs:
+                kwargs['timeout'] = 300
+            self.llm = LLMProviderFactory.create_provider("ollama", "mistral", **kwargs)
         
         if self.use_cache:
             self._load_cache()
@@ -127,12 +136,16 @@ class ContentProcessor:
             5. Always use kebab-case for tags (e.g., "project-management" not "project management")
             6. Include today's date in YYYY-MM-DD format
 
-            ### Link Management:
+            ### Link Management (CRITICAL - CREATE MANY LINKS):
             1. Create EXPLICIT links to other potential notes using [[Topic]] syntax
-            2. For each main concept mentioned, create a link to that concept the FIRST time it appears
-            3. Avoid overlinking - only link important concepts, not every term
-            4. Use descriptive link text with pipe syntax when helpful: [[actual-note-title|Descriptive Link Text]]
-            5. Consider creating bidirectional links between closely related concepts
+            2. For EACH main concept, term, technology, person, or idea mentioned, CREATE A LINK using [[Term]] format
+            3. Create AT LEAST 5-10 LINKS in each note - this is VERY IMPORTANT
+            4. Link to both general concepts AND specific topics (e.g., [[Programming]], [[Python]], [[Database]], [[SQL]])
+            5. Use descriptive link text with pipe syntax when helpful: [[actual-note-title|Descriptive Link Text]]
+            6. ALWAYS include a "Related Concepts" section at the end with 3-7 explicit links to related topics
+            7. For technical content, link to relevant technologies, frameworks, and concepts
+            8. For financial content, link to relevant financial terms, concepts, and instruments
+            9. For knowledge content, link to related fields, theories, and concepts
 
             ## Obsidian Formatting Features to Use:
             - Internal links: [[note-name]] to reference related concepts
@@ -143,29 +156,43 @@ class ContentProcessor:
             - Tables: Use markdown tables for structured information
 
             ## Output Format:
-            For each section, STRICTLY follow this exact format:
+            For each section, you MUST STRICTLY follow this exact format:
 
             ```
             ---
             title: "Clear Descriptive Title"
-            tags: ["primary-topic", "specific-concept", "technical-area"]
+            tags: ["primary-topic", "specific-concept", "technical-area", "relevant-keyword", "domain-specific-tag"]
             date: 2025-07-30
             category: Technology|Finance|Personal|Projects|Knowledge|Reference
             alias: ["Alternative Name", "Another Reference"]
             ---
 
-            ## Clear Descriptive Title
+            # Clear Descriptive Title
 
-            [Well-formatted content with appropriate markdown structure and explicit links to related concepts]
+            [Well-formatted content with appropriate markdown structure and MANY explicit links to related concepts using [[Term]] format. Include at least 5-10 links throughout the content. Make sure all code blocks are properly closed with triple backticks.]
+
+            ## Key Points
+            - First important point with [[relevant link]]
+            - Second important point with [[another link]]
+            - Third important point with [[third link]]
 
             ## Related Concepts
             - [[Concept-One]] - Brief description of relationship
             - [[Concept-Two]] - Brief description of relationship
+            - [[Concept-Three]] - Brief description of relationship
+            - [[Concept-Four]] - Brief description of relationship
+            - [[Concept-Five]] - Brief description of relationship
             ```
 
-            IMPORTANT: Your output MUST contain the full frontmatter block with YAML format exactly as shown above.
-            The category MUST be one of the six allowed categories.
-            Use real content in place of the placeholders.
+            CRITICAL REQUIREMENTS:
+            1. Your output MUST contain the full frontmatter block with YAML format exactly as shown above
+            2. The category MUST be one of the six allowed categories
+            3. Include AT LEAST 5 specific, relevant tags in each note
+            4. DO NOT repeat the title as a heading - use a single # heading with the title
+            5. Include AT LEAST 5-10 internal links using [[Term]] format throughout the content
+            6. ALWAYS include a "Related Concepts" section with 3-7 explicit links
+            7. Ensure all code blocks are properly closed with triple backticks
+            8. Add a "Key Points" section to summarize important information
 
             ## Content to Analyze:
             {content}
@@ -192,7 +219,35 @@ class ContentProcessor:
             # Process with LLM
             logger.info(f"Processing content with LLM: {context_path}")
             prompt = self._get_prompt(content, context_path)
-            result = self.llm.invoke(prompt)
+            try:
+                result = self.llm.invoke(prompt)
+            except Exception as e:
+                logger.error(f"Error invoking LLM for {context_path}: {str(e)}")
+                # Create a minimal fallback response
+                result = f"""---
+title: "{os.path.basename(context_path) if context_path else 'Untitled Note'}"
+tags: ["auto-generated", "error-recovery"]
+date: {datetime.now().strftime('%Y-%m-%d')}
+category: Knowledge
+---
+
+# {os.path.basename(context_path) if context_path else 'Untitled Note'}
+
+{content[:500]}... (content truncated due to processing error)
+
+## Error Information
+Processing error occurred: {str(e)}
+
+## Key Points
+- This note was auto-generated due to an error in LLM processing
+- The original content may need manual review
+- Consider retrying with a different model or breaking the content into smaller chunks
+
+## Related Concepts
+- [[Knowledge Management]]
+- [[Error Handling]]
+- [[Content Processing]]
+"""
             
             # Cache the response
             if self.use_cache:
@@ -218,20 +273,25 @@ class ContentProcessor:
         sections = []
         allowed_categories = ["Technology", "Finance", "Personal", "Projects", "Knowledge", "Reference"]
         
+        # Track if we found any matches
+        found_matches = False
+        
         # Use regex to find each markdown section with frontmatter
         pattern = r'---\s*\n(.*?)\n---\s*\n(.*?)(?=\n---|\Z)'
-        matches = re.finditer(pattern, llm_output, re.DOTALL)
+        matches = list(re.finditer(pattern, llm_output, re.DOTALL))
         
+        # Process standard frontmatter matches
         for match in matches:
+            found_matches = True
             try:
                 frontmatter = match.group(1)
                 content = match.group(2).strip()
-                
+            
                 # Extract metadata from frontmatter
                 title_match = re.search(r'title:\s*"?(.*?)"?$', frontmatter, re.MULTILINE)
                 tags_match = re.search(r'tags:\s*\[(.*?)\]', frontmatter, re.DOTALL)
                 category_match = re.search(r'category:\s*(.*?)$', frontmatter, re.MULTILINE)
-                
+            
                 title = title_match.group(1).strip().strip('"\'') if title_match else "Untitled Note"
                 
                 # Enhanced tag extraction
@@ -271,10 +331,9 @@ class ContentProcessor:
                 # Create proper formatted content
                 formatted_content = f"## {title}\n\n{content}"
                 sections.append((title, formatted_content, category, tags))
-            
             except Exception as e:
                 logger.warning(f"Error extracting section: {str(e)}")
-                continue
+                # Continue to next match
         
         # Multiple fallback methods if no sections were extracted
         if not sections:
@@ -367,6 +426,124 @@ class ContentProcessor:
                     formatted_content = f"## {title}\n\n{llm_output}"
                     sections.append((title, formatted_content, category, tags))
         
+            # If no matches found with the standard pattern, try a more relaxed pattern
+            if not found_matches:
+                logger.warning(f"No sections found with standard pattern for {context_path}, trying relaxed pattern")
+                # Try a more relaxed frontmatter pattern
+                relaxed_pattern = r'---\s*(.*?)---\s*(.*?)(?=\n---|\Z)'
+                matches = re.finditer(relaxed_pattern, llm_output, re.DOTALL)
+                
+                for match in matches:
+                    found_matches = True
+                    try:
+                        frontmatter = match.group(1)
+                        content = match.group(2).strip()
+                        
+                        # Extract metadata with more relaxed patterns
+                        title_match = re.search(r'title:?\s*"?(.*?)"?[\n\r]', frontmatter, re.MULTILINE | re.IGNORECASE)
+                        tags_match = re.search(r'tags:?\s*\[(.*?)\]', frontmatter, re.DOTALL | re.IGNORECASE)
+                        category_match = re.search(r'category:?\s*(.*?)[\n\r]', frontmatter, re.MULTILINE | re.IGNORECASE)
+                        
+                        title = title_match.group(1).strip().strip('"\'') if title_match else "Untitled Note"
+                        
+                        # Parse tags
+                        tags = []
+                        if tags_match:
+                            raw_tags = tags_match.group(1).strip()
+                            tag_pattern = r'"([^"]+)"|\'([^\']+)\'|([^,\s]+)'
+                            tag_matches = re.findall(tag_pattern, raw_tags)
+                            for tag_match in tag_matches:
+                                tag = next((t for t in tag_match if t), "").strip()
+                                if tag:
+                                    tags.append(tag)
+                        
+                        # Get category
+                        category = None
+                        if category_match:
+                            category = category_match.group(1).strip().strip('"\'')
+                        
+                        if not category or category not in allowed_categories:
+                            category = self._generate_category_from_title(title)
+                        
+                        sections.append((title, content, category, tags))
+                    except Exception as e:
+                        logger.warning(f"Error extracting section with relaxed pattern: {str(e)}")
+            
+            # If still no matches, try heading-based extraction
+            if not found_matches:
+                logger.warning(f"No sections found with frontmatter patterns for {context_path}, trying heading-based extraction")
+                # Try to extract based on headings
+                h1_sections = re.split(r'\n#\s+', llm_output)
+                
+                if len(h1_sections) > 1:  # First element is content before first h1, might be empty
+                    for i, section in enumerate(h1_sections[1:], 1):  # Skip the first element
+                        try:
+                            # Extract title from the first line
+                            title_end = section.find('\n')
+                            if title_end > 0:
+                                title = section[:title_end].strip()
+                                body = section[title_end:].strip()
+                                
+                                # Generate metadata
+                                category = self._generate_category_from_title(title)
+                                tags = self._generate_tags_from_content(title, body)
+                                
+                                formatted_content = f"# {title}\n\n{body}"
+                                sections.append((title, formatted_content, category, tags))
+                                found_matches = True
+                        except Exception as e:
+                            logger.debug(f"Error in heading-based extraction: {str(e)}")
+                
+                # If still no matches, try h2 headings
+                if not found_matches:
+                    h2_sections = re.split(r'\n##\s+', llm_output)
+                    if len(h2_sections) > 1:
+                        for i, section in enumerate(h2_sections[1:], 1):
+                            try:
+                                title_end = section.find('\n')
+                                if title_end > 0:
+                                    title = section[:title_end].strip()
+                                    body = section[title_end:].strip()
+                                    
+                                    category = self._generate_category_from_title(title)
+                                    tags = self._generate_tags_from_content(title, body)
+                                    
+                                    formatted_content = f"## {title}\n\n{body}"
+                                    sections.append((title, formatted_content, category, tags))
+                                    found_matches = True
+                            except Exception as e:
+                                logger.debug(f"Error in h2 heading-based extraction: {str(e)}")
+            
+            # Final fallback: treat the entire content as a single note
+            if not found_matches:
+                logger.warning(f"All pattern-based extraction methods failed for {context_path}, using whole content as single note")
+                try:
+                    # Try to find a title or use the first line/sentence
+                    title_match = re.search(r'^#+\s+(.*?)$', llm_output, re.MULTILINE)
+                    if title_match:
+                        title = title_match.group(1).strip()
+                    else:
+                        # Use first non-empty line as title
+                        first_lines = [line.strip() for line in llm_output.split('\n') if line.strip()]
+                        if first_lines:
+                            # Limit title length
+                            title = first_lines[0][:50]
+                            if len(first_lines[0]) > 50:
+                                title += "..."
+                        else:
+                            title = os.path.basename(context_path) if context_path else "Untitled Note"
+                    
+                    # Generate metadata
+                    category = self._generate_category_from_title(title)
+                    tags = self._generate_tags_from_content(title, llm_output)
+                    
+                    sections.append((title, llm_output, category, tags))
+                except Exception as e:
+                    logger.error(f"Final fallback extraction failed: {str(e)}")
+                    # Create absolute minimal note
+                    title = os.path.basename(context_path) if context_path else "Untitled Note"
+                    sections.append((title, llm_output, "Knowledge", []))
+                
         # Post-process: ensure all sections have a valid category
         for i, (title, content, category, tags) in enumerate(sections):
             if not category or category not in allowed_categories:
@@ -456,19 +633,96 @@ class ContentProcessor:
         Returns:
             A list of generated tags
         """
+        tags = []
+        
         # Extract meaningful words from title
         words = re.findall(r'\b[a-zA-Z0-9]{3,}\b', title.lower())
         
         # Filter out common stop words
-        stop_words = {'the', 'and', 'for', 'with', 'this', 'that', 'from', 'about'}
-        tags = [word for word in words if word not in stop_words]
+        stop_words = {'the', 'and', 'for', 'with', 'this', 'that', 'from', 'about', 'have', 'has', 'had', 
+                     'not', 'what', 'when', 'where', 'who', 'how', 'which', 'there', 'their', 'they',
+                     'been', 'were', 'would', 'could', 'should', 'will', 'then', 'than', 'them', 'these'}
+        title_tags = [word for word in words if word not in stop_words]
+        tags.extend(title_tags)
         
         # Add tags from common patterns in content
         if re.search(r'```[a-zA-Z]*\n', content):
+            code_lang = re.search(r'```([a-zA-Z0-9]+)', content)
+            if code_lang and code_lang.group(1):
+                tags.append(f'{code_lang.group(1)}-code')
             tags.append('code-snippet')
             
+        # Extract programming languages and technologies
+        tech_patterns = {
+            'python': r'\bpython\b',
+            'javascript': r'\b(javascript|js)\b',
+            'typescript': r'\b(typescript|ts)\b',
+            'java': r'\bjava\b',
+            'c-sharp': r'\b(c#|c-sharp|csharp)\b',
+            'cpp': r'\b(c\+\+|cpp)\b',
+            'php': r'\bphp\b',
+            'ruby': r'\bruby\b',
+            'go': r'\bgo\b',
+            'rust': r'\brust\b',
+            'swift': r'\bswift\b',
+            'kotlin': r'\bkotlin\b',
+            'react': r'\breact\b',
+            'angular': r'\bangular\b',
+            'vue': r'\bvue\b',
+            'node': r'\bnode\.?js\b',
+            'docker': r'\bdocker\b',
+            'kubernetes': r'\b(kubernetes|k8s)\b',
+            'aws': r'\baws\b',
+            'azure': r'\bazure\b',
+            'gcp': r'\b(gcp|google cloud)\b',
+            'database': r'\b(database|db)\b',
+            'sql': r'\bsql\b',
+            'nosql': r'\bnosql\b',
+            'mongodb': r'\bmongodb\b',
+            'redis': r'\bredis\b',
+            'api': r'\bapi\b',
+            'rest': r'\brest\b',
+            'graphql': r'\bgraphql\b',
+            'blockchain': r'\bblockchain\b',
+            'crypto': r'\b(crypto|cryptocurrency)\b',
+            'ai': r'\b(ai|artificial intelligence)\b',
+            'ml': r'\b(ml|machine learning)\b',
+            'dl': r'\b(dl|deep learning)\b'
+        }
+        
+        for tag, pattern in tech_patterns.items():
+            if re.search(pattern, content.lower()):
+                tags.append(tag)
+                
+        # Extract financial terms
+        finance_patterns = {
+            'investing': r'\binvest(ing|ment)?\b',
+            'trading': r'\btrad(ing|e)\b',
+            'stocks': r'\bstock(s)?\b',
+            'crypto': r'\b(crypto|cryptocurrency|bitcoin|ethereum|token)\b',
+            'banking': r'\bbank(ing)?\b',
+            'budget': r'\bbudget\b',
+            'accounting': r'\baccounting\b',
+            'finance': r'\bfinanc(e|ial)\b',
+            'economy': r'\beconom(y|ic)\b',
+            'market': r'\bmarket\b'
+        }
+        
+        for tag, pattern in finance_patterns.items():
+            if re.search(pattern, content.lower()):
+                tags.append(tag)
+                
+        # Extract content format indicators
         if re.search(r'https?://[^\s]+', content):
             tags.append('links')
+            
+            # Check for specific sites
+            if re.search(r'github\.com', content.lower()):
+                tags.append('github')
+            if re.search(r'stackoverflow\.com', content.lower()):
+                tags.append('stackoverflow')
+            if re.search(r'youtube\.com|youtu\.be', content.lower()):
+                tags.append('youtube')
             
         if re.search(r'\d{4}-\d{2}-\d{2}', content):
             tags.append('dated')
@@ -476,5 +730,65 @@ class ContentProcessor:
         if len(re.findall(r'^\s*-\s+', content, re.MULTILINE)) > 3:
             tags.append('list')
             
-        # Limit to 5 tags
-        return list(set(tags))[:5]
+        if len(re.findall(r'^\s*\d+\.\s+', content, re.MULTILINE)) > 3:
+            tags.append('numbered-list')
+            
+        if re.search(r'\|\s*-+\s*\|', content):
+            tags.append('table')
+            
+        if re.search(r'!\[\s*\]\(', content):
+            tags.append('images')
+        
+        # Look for domain-specific content
+        domains = {
+            'tutorial': r'\b(tutorial|how[-\s]to|guide)\b',
+            'reference': r'\b(reference|cheatsheet|documentation)\b',
+            'concept': r'\b(concept|theory|principle)\b',
+            'tool': r'\b(tool|utility|application)\b',
+            'project': r'\b(project|implementation)\b',
+            'research': r'\b(research|study|analysis)\b',
+            'note': r'\b(note|summary|overview)\b'
+        }
+        
+        for tag, pattern in domains.items():
+            if re.search(pattern, content.lower()):
+                tags.append(tag)
+        
+        # Convert tags to kebab-case and ensure uniqueness
+        processed_tags = []
+        for tag in tags:
+            # Convert to lowercase and replace spaces/underscores with hyphens
+            kebab_tag = tag.lower().replace(' ', '-').replace('_', '-')
+            # Remove any non-alphanumeric characters except hyphens
+            kebab_tag = re.sub(r'[^a-z0-9-]', '', kebab_tag)
+            # Ensure no consecutive hyphens
+            kebab_tag = re.sub(r'-+', '-', kebab_tag)
+            # Remove leading/trailing hyphens
+            kebab_tag = kebab_tag.strip('-')
+            
+            if kebab_tag and len(kebab_tag) > 1:  # Ensure tag is not empty and not just a single character
+                processed_tags.append(kebab_tag)
+        
+        # Remove duplicates while preserving order
+        unique_tags = []
+        for tag in processed_tags:
+            if tag not in unique_tags:
+                unique_tags.append(tag)
+        
+        # Ensure we have at least 3 tags, add generic ones if needed
+        if len(unique_tags) < 3:
+            category = self._generate_category_from_title(title)
+            if category.lower() not in unique_tags:
+                unique_tags.append(category.lower())
+            
+            if 'note' not in unique_tags:
+                unique_tags.append('note')
+                
+            if 'reference' not in unique_tags and category == 'Reference':
+                unique_tags.append('reference')
+                
+            if 'knowledge' not in unique_tags and category == 'Knowledge':
+                unique_tags.append('knowledge')
+        
+        # Limit to 10 tags, prioritizing more specific ones (usually longer)
+        return sorted(unique_tags, key=len, reverse=True)[:10]

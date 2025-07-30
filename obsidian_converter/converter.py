@@ -79,7 +79,8 @@ class ObsidianConverter:
         
         # Initialize the content processor with provider settings
         llm_kwargs = {
-            "temperature": self.config.llm_temperature
+            "temperature": self.config.llm_temperature,
+            "timeout": self.config.llm_timeout
         }
         
         # Add API keys if available
@@ -345,6 +346,26 @@ alias: [{title}]
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
             
+        # Validate and fix content before adding to existing notes
+        try:
+            fixed_content = self._validate_and_fix_content(content)
+        except Exception as e:
+            logger.warning(f"Error validating content: {e}")
+            fixed_content = content
+        
+        # Write the fixed content if needed
+        if fixed_content != content:
+            logger.debug(f"Fixed content issues in {md_filename}")
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(fixed_content)
+            content = fixed_content
+            
+            # Re-extract content without frontmatter after fixing
+            if "---" in content:
+                parts = content.split("---", 2)
+                if len(parts) >= 3:
+                    content_without_frontmatter = parts[2].strip()
+        
         # Add to existing notes for future linking
         self.existing_notes[md_filename] = (title, content_without_frontmatter)
         
@@ -378,9 +399,10 @@ alias: [{title}]
             return []
         
         try:
-            # Extract key phrases from content for enhanced matching
+            # Extract key phrases and concepts from content for enhanced matching
             content_lower = content.lower()
             key_phrases = set()
+            key_concepts = set()
             
             # Look for common patterns that might indicate key phrases
             # Extract phrases in quotes
@@ -405,17 +427,38 @@ alias: [{title}]
             headers = re.findall(r'^#+\s+(.*?)$', content, re.MULTILINE)
             key_phrases.update(headers)
             
-            # Add content with extra weight for key phrases
+            # Extract potential concepts and technical terms
+            # Technology terms
+            tech_terms = re.findall(r'\b(python|javascript|typescript|java|c\+\+|ruby|go|rust|react|angular|vue|node\.?js|docker|kubernetes|aws|azure|gcp|sql|nosql|mongodb|redis|api|rest|graphql|blockchain|crypto|ai|ml)\b', content_lower)
+            key_concepts.update(tech_terms)
+            
+            # Financial terms
+            finance_terms = re.findall(r'\b(invest(ing|ment)?|trad(ing|e)|stock(s)?|crypto(currency)?|bitcoin|ethereum|bank(ing)?|budget|accounting|financ(e|ial)|econom(y|ic)|market)\b', content_lower)
+            key_concepts.update([t[0] for t in finance_terms if t[0]])
+            
+            # General concepts (common nouns that might be important)
+            concept_pattern = r'\b([A-Z][a-z]{2,}(?:\s[A-Z][a-z]{2,})*)\b'
+            potential_concepts = re.findall(concept_pattern, content)
+            key_concepts.update(potential_concepts)
+            
+            # Add content with extra weight for key phrases and concepts
             weighted_content = content
+            
+            # Add key phrases with high weight (3x)
             for phrase in key_phrases:
                 if len(phrase) > 3:  # Only use meaningful phrases
-                    weighted_content += f" {phrase} {phrase}"  # Repeat for extra weight
+                    weighted_content += f" {phrase} {phrase} {phrase}"  # Repeat for extra weight
+            
+            # Add key concepts with medium weight (2x)
+            for concept in key_concepts:
+                if len(concept) > 3:  # Only use meaningful concepts
+                    weighted_content += f" {concept} {concept}"  # Repeat for extra weight
             
             # Use enhanced vectorizer for better results
             vectorizer = TfidfVectorizer(
                 stop_words='english',
-                max_features=10000,  # Allow more features
-                ngram_range=(1, 2),  # Include bigrams for better context
+                max_features=15000,  # Allow more features
+                ngram_range=(1, 3),  # Include trigrams for better context
                 min_df=1,
                 max_df=0.95
             )
@@ -426,17 +469,33 @@ alias: [{title}]
             
             similarity = cosine_similarity(vectors[-1], vectors[:-1])
             
-            # Use dynamic similarity threshold - minimum of configured threshold or 0.2
-            effective_threshold = max(self.similarity_threshold, 0.2)
+            # Use more aggressive similarity threshold to get more links
+            effective_threshold = max(self.similarity_threshold * 0.8, 0.15)  # Lower threshold to get more links
             
             # Get top matches plus all that are above threshold
-            max_suggestions = min(12, max(5, self.max_links))  # At least 5, at most 12
+            max_suggestions = min(20, max(8, self.max_links))  # At least 8, at most 20
             similar_indices = similarity.argsort()[0][-max_suggestions:][::-1]
             
+            # Find potential direct concept matches
+            direct_matches = []
+            for concept in key_concepts:
+                if len(concept) > 3:
+                    concept_lower = concept.lower()
+                    for i, title in enumerate(existing_titles):
+                        if concept_lower in title.lower():
+                            direct_matches.append(i)
+            
+            # Combine direct matches with similarity matches
+            all_match_indices = list(set(similar_indices.tolist() + direct_matches))
+            
             # Return list of (title, filename) tuples for similar notes
-            return [(existing_titles[i], existing_filenames[i]) 
-                    for i in similar_indices 
-                    if similarity[0][i] > effective_threshold]
+            results = []
+            for i in all_match_indices:
+                if i < len(existing_titles) and (i in direct_matches or similarity[0][i] > effective_threshold):
+                    results.append((existing_titles[i], existing_filenames[i]))
+            
+            # Limit to max_suggestions
+            return results[:max_suggestions]
                     
         except Exception as e:
             logger.warning(f"Error computing note similarities: {e}")
@@ -644,6 +703,165 @@ Welcome to your knowledge base! This page serves as the central hub to navigate 
             logger.error(f"Error processing item {file_path}: {e}")
             return 0, file_path
             
+    def _validate_and_fix_content(self, content):
+        """
+        Validate and fix common issues in note content
+        
+        Args:
+            content: The note content to validate and fix
+            
+        Returns:
+            Fixed content
+        """
+        # Fix duplicate headers
+        # Find the first heading level (# or ## or ###)
+        heading_match = re.search(r'^(#+)\s+(.*?)$', content, re.MULTILINE)
+        if heading_match:
+            heading_level = heading_match.group(1)
+            heading_text = heading_match.group(2)
+            
+            # Check for duplicate headings with the same text
+            duplicate_pattern = f"^{heading_level}\\s+{re.escape(heading_text)}$"
+            matches = re.findall(duplicate_pattern, content, re.MULTILINE)
+            
+            if len(matches) > 1:
+                # Keep only the first occurrence
+                seen_count = [0]
+                def replace_func(m):
+                    seen_count[0] += 1
+                    return m.group(0) if seen_count[0] <= 1 else ""
+                content = re.sub(duplicate_pattern, replace_func, content, flags=re.MULTILINE)
+        
+        # Fix unclosed code blocks
+        code_block_starts = re.findall(r'```[a-zA-Z0-9]*', content)
+        code_block_ends = re.findall(r'```\s*$', content, re.MULTILINE)
+        
+        if len(code_block_starts) > len(code_block_ends):
+            # Add missing closing code blocks
+            content += "\n```\n"
+        
+        # Remove any trailing code blocks at the end of the file
+        content = re.sub(r'\n```\s*$', '', content)
+        
+        # Remove any standalone code blocks (not part of a section)
+        content = re.sub(r'\n```markdown\s*\n+```\s*\n', '\n', content)
+        content = re.sub(r'\n```\s*\n+```\s*\n', '\n', content)
+        
+        # Remove LLM self-explanations or meta-commentary
+        content = re.sub(r'\nFor the given content.*', '', content)
+        content = re.sub(r'\nI have analyzed the.*', '', content)
+        content = re.sub(r'\nBased on the content.*', '', content)
+        
+        # Remove unnecessary bracketed text that looks like LLM explanations
+        content = re.sub(r'\[This note (?:provides|describes|explains|covers|discusses|outlines).*?\]', '', content)
+        content = re.sub(r'\nThis note provides.*', '', content)
+        content = re.sub(r'\nThe content is about.*', '', content)
+        content = re.sub(r'\nI\'ve organized the.*', '', content)
+        
+        # Fix duplicate headers
+        content = re.sub(r'(## [^\n]+)\n+# \1', r'\1', content)
+        content = re.sub(r'(# [^\n]+)\n+## \1', r'\1', content)
+        
+        # Fix missing Related Concepts section
+        if "## Related Concepts" not in content and "# Related Concepts" not in content:
+            # Add a minimal Related Concepts section
+            content += "\n\n## Related Concepts\n"
+            
+            # Try to extract category from frontmatter
+            category = None
+            category_match = re.search(r'category:\s*(\w+)', content)
+            if category_match:
+                category = category_match.group(1)
+            
+            # Add relevant links based on category
+            if category == "Technology":
+                content += "- [[Programming]] - Programming concepts and techniques\n"
+                content += "- [[Software Development]] - Software development methodologies\n"
+                content += "- [[Computer Science]] - Fundamental computer science concepts\n"
+            elif category == "Finance":
+                content += "- [[Investment]] - Investment strategies and concepts\n"
+                content += "- [[Economics]] - Economic principles and theories\n"
+                content += "- [[Financial Planning]] - Personal and business financial planning\n"
+            elif category == "Personal":
+                content += "- [[Self Improvement]] - Personal development strategies\n"
+                content += "- [[Productivity]] - Methods to enhance productivity\n"
+                content += "- [[Health]] - Health and wellness information\n"
+            elif category == "Projects":
+                content += "- [[Project Management]] - Project management methodologies\n"
+                content += "- [[Team Collaboration]] - Strategies for team collaboration\n"
+                content += "- [[Business Strategy]] - Business planning and strategy\n"
+            elif category == "Knowledge":
+                content += "- [[Learning]] - Learning methods and approaches\n"
+                content += "- [[Research]] - Research methodologies and findings\n"
+                content += "- [[Education]] - Educational concepts and resources\n"
+            else:  # Reference or default
+                content += "- [[Knowledge]] - General knowledge base\n"
+                content += "- [[Reference]] - Reference materials\n"
+                content += "- [[Resources]] - Useful resources and tools\n"
+        
+        # Fix frontmatter issues
+        if content.startswith("---"):
+            # Extract frontmatter
+            frontmatter_match = re.match(r'---\n(.*?)\n---', content, re.DOTALL)
+            if frontmatter_match:
+                frontmatter = frontmatter_match.group(1)
+                
+                # Check for required fields
+                required_fields = {
+                    "title": r'^title:',
+                    "date": r'^date:',
+                    "tags": r'^tags:',
+                    "category": r'^category:',
+                    "created": r'^created:',
+                    "modified": r'^modified:',
+                    "alias": r'^alias:'
+                }
+                
+                fixed_frontmatter = frontmatter
+                
+                for field, pattern in required_fields.items():
+                    if not re.search(pattern, frontmatter, re.MULTILINE):
+                        # Add missing field
+                        if field == "title":
+                            # Extract title from first heading
+                            title_match = re.search(r'^#+\s+(.*?)$', content, re.MULTILINE)
+                            title = title_match.group(1) if title_match else "Untitled Note"
+                            fixed_frontmatter += f'\ntitle: "{title}"'
+                        elif field == "date":
+                            fixed_frontmatter += f'\ndate: {datetime.now().strftime("%Y-%m-%d")}'
+                        elif field == "tags":
+                            fixed_frontmatter += '\ntags: []'
+                        elif field == "category":
+                            fixed_frontmatter += '\ncategory: Knowledge'
+                        elif field == "created":
+                            fixed_frontmatter += f'\ncreated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
+                        elif field == "modified":
+                            fixed_frontmatter += f'\nmodified: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
+                        elif field == "alias":
+                            # Extract title
+                            title_match = re.search(r'title:\s*"?(.*?)"?$', fixed_frontmatter, re.MULTILINE)
+                            if title_match:
+                                title = title_match.group(1).strip('"\'')
+                                fixed_frontmatter += f'\nalias: [{title}]'
+                            else:
+                                fixed_frontmatter += '\nalias: []'
+                
+                # Replace frontmatter if changes were made
+                if fixed_frontmatter != frontmatter:
+                    content = content.replace(f"---\n{frontmatter}\n---", f"---\n{fixed_frontmatter}\n---")
+        
+        # Fix formatting issues
+        # Ensure proper spacing between sections
+        content = re.sub(r'(\n#+\s+.*?\n)(?!\n)', r'\1\n', content)
+        
+        # Fix multiple consecutive blank lines
+        content = re.sub(r'\n{3,}', '\n\n', content)
+        
+        # Ensure content doesn't end with excessive newlines
+        content = content.rstrip() + "\n"
+        
+        return content
+        
     def run(self):
         """
         Run the conversion process for all files

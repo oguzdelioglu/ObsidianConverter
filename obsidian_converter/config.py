@@ -22,6 +22,7 @@ class ObsidianConverterConfig:
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     llm_temperature: float = 0.7
+    llm_timeout: int = 300  # Timeout in seconds for LLM calls
     
     # Processing settings
     similarity_threshold: float = 0.3
@@ -90,6 +91,7 @@ class ObsidianConverterConfig:
             config.parallel_processing = config_data.get('parallel_processing', config.parallel_processing)
             config.max_workers = config_data.get('max_workers', config.max_workers)
             config.chunk_size = config_data.get('chunk_size', config.chunk_size)
+            config.llm_timeout = config_data.get('llm_timeout', config.llm_timeout)
             
             # Obsidian specific settings
             if 'obsidian_features' in config_data:
@@ -139,6 +141,7 @@ class ObsidianConverterConfig:
                 'parallel_processing': self.parallel_processing,
                 'max_workers': self.max_workers,
                 'chunk_size': self.chunk_size,
+                'llm_timeout': self.llm_timeout,
                 'obsidian_features': self.obsidian_features,
                 'category_mapping': self.category_mapping,
                 'include_patterns': self.include_patterns,

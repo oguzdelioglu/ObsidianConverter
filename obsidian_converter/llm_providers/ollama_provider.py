@@ -24,7 +24,7 @@ class OllamaProvider(BaseLLMProvider):
         """
         super().__init__(model_name)
         self.base_url = base_url.rstrip("/")
-        self.timeout = kwargs.get("timeout", 120)  # Timeout in seconds
+        self.timeout = kwargs.get("timeout", 300)  # Timeout in seconds (increased to 5 minutes)
     
     def invoke(self, prompt: str) -> str:
         """
