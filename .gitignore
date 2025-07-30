@@ -1,0 +1,9 @@
+txt
+build
+bin
+vault
+obsidian_converter.egg-info
+venv
+**cache.json
+**/__pycache__
+.DS_Store
